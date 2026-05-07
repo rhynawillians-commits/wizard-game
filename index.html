@@ -237,10 +237,10 @@
         
         <div id="instructions">
             <span class="key">A D</span> Move &nbsp;|&nbsp;
-            <span class="key pulse-anim">PRESS / HOLD W</span> Jump &nbsp;|&nbsp;
-            <span class="key fire pulse-anim">PRESS / HOLD F / Click</span> Fire
+            <span class="key pulse-anim">PRESS/HOLD W</span> Jump &nbsp;|&nbsp;
+            <span class="key fire pulse-anim">PRESS/HOLD F</span> Fire
             <span id="inst-lightning-wrapper" style="display:none;">
-                &nbsp;|&nbsp; <span class="key lightning pulse-anim">PRESS / HOLD E</span> Lightning
+                &nbsp;|&nbsp; <span class="key lightning pulse-anim">PRESS/HOLD E</span> Lightning
             </span>
         </div>
     </div>
@@ -271,8 +271,8 @@
             canvas.height = GAME_HEIGHT;
 
             const spriteCanvas = document.createElement('canvas');
-            spriteCanvas.width = 400; // Increased base dimension to safely render giant bosses
-            spriteCanvas.height = 400;
+            spriteCanvas.width = 120;
+            spriteCanvas.height = 120;
             const spriteCtx = spriteCanvas.getContext('2d');
 
             function resizeCanvas() {
@@ -361,21 +361,20 @@
             }
 
             // ─────────────────────────────────────
-            // GAME STATE & MODIFIED GLOBALS
+            // GAME STATE
             // ─────────────────────────────────────
-            const STATE = { STORY: 'story', PLAYING: 'playing', LEVEL_COMPLETE: 'levelComplete', GAME_OVER: 'gameOver' };
-            let gameState = STATE.STORY;
+            const STATE = { STORY: 'story', PLAYING: 'playing', LEVEL_COMPLETE: 'levelComplete', GAME_OVER: 'gameOver', RESPAWNING: 'respawning' };
+            let gameState = STATE.STORY; 
             let levelTransitionTimer = 0;
             let gameOverTimer = 0;
             let level = 1;
             let score = 0;
             let npcsRemaining = 0;
-            
             let playerHealth = 5;
             let maxHealth = 5;
-            let extraLives = 3;             // Mod 5: Extra Lives tracker
-            let totalDemonsKilled = 0;      // Mod 3 & 5: Tracker for health/life drops
-            
+            let playerLives = 3;
+            let sessionDemonsKilled = 0;
+            let totalDemonsKilled = 0;
             let shakeTimer = 0;
             let shakeIntensity = 0;
 
@@ -417,13 +416,14 @@
             function isLeftInput() { return keys['a'] || keys['arrowleft'] || keys['KeyA'] || keys['ArrowLeft'] || mobLeft; }
             function isRightInput() { return keys['d'] || keys['arrowright'] || keys['KeyD'] || keys['ArrowRight'] || mobRight; }
             function isFireInput() { return keys['f'] || keys['j'] || keys['KeyF'] || keys['KeyJ'] || mousePressed || mobFire; }
+            
             function isLightningInput() { 
                 if (level < 10) return false;
                 return keys['e'] || keys['k'] || keys['KeyE'] || keys['KeyK'] || mobLightning; 
             }
 
             // ─────────────────────────────────────
-            // CORE UTILS
+            // CORE UTILS & ITEMS
             // ─────────────────────────────────────
             class Particle {
                 constructor(x, y, vx, vy, color, life = 30, size = 3) {
@@ -451,13 +451,32 @@
                 }
             }
 
-            // Mod 4 Helper: Increased scale boundaries to handle Giant Bosses safely.
-            function drawEntityWithFlash(ctx, cx, bottom, facingRight, drawFunc, flashColor = null, flashAlpha = 0, scale = 1) {
-                spriteCtx.clearRect(0, 0, 400, 400);
+            class Item {
+                constructor(x, y, type) {
+                    this.x = x; this.y = y; this.type = type;
+                    this.timer = 0;
+                }
+                update() {
+                    this.timer++;
+                    this.y += Math.sin(this.timer * 0.1) * 0.2; 
+                }
+                draw(ctx) {
+                    if (Math.floor(this.timer / 15) % 2 === 0) {
+                        ctx.font = '22px "Segoe UI", Arial, sans-serif';
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'middle';
+                        ctx.fillText(this.type === 'health' ? '❤️' : '🩷', this.x, this.y);
+                    }
+                }
+                getBounds() { return { left: this.x - 12, right: this.x + 12, top: this.y - 12, bottom: this.y + 12 }; }
+            }
+            let items = [];
+
+            function drawEntityWithFlash(ctx, cx, bottom, facingRight, drawFunc, flashColor = null, flashAlpha = 0) {
+                spriteCtx.clearRect(0, 0, 120, 120);
                 spriteCtx.save();
-                spriteCtx.translate(200, 320); // Translation mapped perfectly for normal 120 and giant rendering
+                spriteCtx.translate(60, 100);
                 if (!facingRight) spriteCtx.scale(-1, 1);
-                spriteCtx.scale(scale, scale);
                 
                 drawFunc(spriteCtx);
                 spriteCtx.restore();
@@ -466,12 +485,12 @@
                     spriteCtx.globalCompositeOperation = 'source-atop';
                     spriteCtx.fillStyle = flashColor;
                     spriteCtx.globalAlpha = flashAlpha;
-                    spriteCtx.fillRect(0, 0, 400, 400);
+                    spriteCtx.fillRect(0, 0, 120, 120);
                     spriteCtx.globalAlpha = 1.0;
                     spriteCtx.globalCompositeOperation = 'source-over';
                 }
 
-                ctx.drawImage(spriteCanvas, cx - 200, bottom - 320);
+                ctx.drawImage(spriteCanvas, cx - 60, bottom - 100);
             }
 
             // ─────────────────────────────────────
@@ -518,26 +537,7 @@
             }
 
             // ─────────────────────────────────────
-            // DROPS CLASS (Mod 3 & 5)
-            // ─────────────────────────────────────
-            class Drop {
-                constructor(x, y, type) {
-                    this.x = x; this.y = y; this.type = type;
-                    this.timer = 0;
-                }
-                update() { this.timer++; }
-                draw(ctx) {
-                    if (Math.floor(this.timer / 10) % 2 === 0) return; // Blinking effect
-                    ctx.font = '18px sans-serif';
-                    ctx.textAlign = 'center';
-                    ctx.fillText(this.type === 'life' ? '🩷' : '❤️', this.x, this.y);
-                }
-                getBounds() { return { left: this.x - 10, right: this.x + 10, top: this.y - 18, bottom: this.y }; }
-            }
-            let drops = [];
-
-            // ─────────────────────────────────────
-            // PROJECTILE CLASS
+            // PROJECTILE CLASSES
             // ─────────────────────────────────────
             class Projectile {
                 constructor(x, y, direction, multiplier, type) {
@@ -546,36 +546,21 @@
                     this.multiplier = multiplier;
                     this.type = type; 
                     
-                    this.useVector = false; // Mod 4 Support
-                    this.vx = 0; this.vy = 0;
-
-                    if (type === 'boss_fireball') {
-                        this.speed = 10;
-                        this.radius = 20;
-                        this.damage = 999;
-                    } else {
-                        this.speed = type === 'lightning' ? 14 : 9;
-                        this.radius = (type === 'lightning' ? 8 : 7) * multiplier;
-                        this.damage = (type === 'lightning' ? 9 : 1) * multiplier;
-                    }
+                    this.speed = type === 'lightning' ? 14 : 9;
+                    this.radius = (type === 'lightning' ? 8 : 7) * multiplier;
+                    this.damage = (type === 'lightning' ? 9 : 1) * multiplier;
                     
                     this.lifetime = 150; 
                     this.trailTimer = 0;
                 }
                 update() {
-                    if (this.useVector) {
-                        this.x += this.vx; this.y += this.vy;
-                    } else {
-                        this.x += this.speed * this.direction;
-                    }
-                    
+                    this.x += this.speed * this.direction;
                     this.lifetime--; this.trailTimer++;
                     
-                    if ((this.type === 'fireball' || this.type === 'boss_fireball') && this.trailTimer >= 3) {
+                    if (this.type === 'fireball' && this.trailTimer >= 3) {
                         this.trailTimer = 0;
                         const pCount = Math.ceil(this.radius / 7);
-                        const pColors = this.type === 'boss_fireball' ? ['#0088ff', '#00aaff', '#ffffff'] : ['#ff6b35', '#ff9f43', '#ffcc02'];
-                        spawnParticles(this.x, this.y, pCount, pColors, this.radius/3, 15, this.radius/3);
+                        spawnParticles(this.x, this.y, pCount, ['#ff6b35', '#ff9f43', '#ffcc02'], this.radius/3, 15, this.radius/3);
                     } else if (this.type === 'lightning' && this.trailTimer >= 2) {
                         this.trailTimer = 0;
                         const pCount = Math.ceil(this.radius / 6);
@@ -583,30 +568,16 @@
                     }
                 }
                 draw(ctx) {
-                    if (this.type === 'fireball' || this.type === 'boss_fireball') {
-                        const isBoss = this.type === 'boss_fireball';
+                    if (this.type === 'fireball') {
                         const glowGrad = ctx.createRadialGradient(this.x, this.y, this.radius * 0.3, this.x, this.y, this.radius * 2.5);
-                        
-                        if (isBoss) {
-                            glowGrad.addColorStop(0, 'rgba(100,200,255,0.9)'); glowGrad.addColorStop(0.3, 'rgba(20,140,255,0.6)');
-                            glowGrad.addColorStop(0.7, 'rgba(10,60,255,0.2)'); glowGrad.addColorStop(1, 'rgba(0,30,255,0)');
-                        } else {
-                            glowGrad.addColorStop(0, 'rgba(255,200,50,0.9)'); glowGrad.addColorStop(0.3, 'rgba(255,140,20,0.6)');
-                            glowGrad.addColorStop(0.7, 'rgba(255,60,10,0.2)'); glowGrad.addColorStop(1, 'rgba(255,30,0,0)');
-                        }
-                        
+                        glowGrad.addColorStop(0, 'rgba(255,200,50,0.9)'); glowGrad.addColorStop(0.3, 'rgba(255,140,20,0.6)');
+                        glowGrad.addColorStop(0.7, 'rgba(255,60,10,0.2)'); glowGrad.addColorStop(1, 'rgba(255,30,0,0)');
                         ctx.fillStyle = glowGrad;
                         ctx.beginPath(); ctx.arc(this.x, this.y, this.radius * 2.5, 0, Math.PI * 2); ctx.fill();
 
                         const coreGrad = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, this.radius);
-                        if (isBoss) {
-                            coreGrad.addColorStop(0, '#ffffff'); coreGrad.addColorStop(0.3, '#aaffff');
-                            coreGrad.addColorStop(0.6, '#30aaff'); coreGrad.addColorStop(1, '#0055ff');
-                        } else {
-                            coreGrad.addColorStop(0, '#ffffff'); coreGrad.addColorStop(0.3, '#ffffaa');
-                            coreGrad.addColorStop(0.6, '#ffaa30'); coreGrad.addColorStop(1, '#ff5500');
-                        }
-
+                        coreGrad.addColorStop(0, '#ffffff'); coreGrad.addColorStop(0.3, '#ffffaa');
+                        coreGrad.addColorStop(0.6, '#ffaa30'); coreGrad.addColorStop(1, '#ff5500');
                         ctx.fillStyle = coreGrad;
                         ctx.beginPath(); ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2); ctx.fill();
 
@@ -634,29 +605,50 @@
                 get dead() { return this.lifetime <= 0 || this.x < -300 || this.x > GAME_WIDTH + 300 || this.y < -300 || this.y > GAME_HEIGHT + 300; }
                 getBounds() { return { left: this.x - this.radius, right: this.x + this.radius, top: this.y - this.radius, bottom: this.y + this.radius }; }
             }
+
+            class BossProjectile {
+                constructor(x, y, vx, vy) {
+                    this.x = x; this.y = y; this.vx = vx; this.vy = vy;
+                    this.radius = 25; this.type = 'boss_fireball';
+                    this.lifetime = 400; this.trailTimer = 0;
+                }
+                update() {
+                    this.x += this.vx; this.y += this.vy;
+                    this.lifetime--; this.trailTimer++;
+                    if (this.trailTimer >= 2) {
+                        this.trailTimer = 0;
+                        spawnParticles(this.x, this.y, 3, ['#0088ff', '#00ffff', '#ffffff'], this.radius/2, 15, 6);
+                    }
+                }
+                draw(ctx) {
+                    const glowGrad = ctx.createRadialGradient(this.x, this.y, this.radius * 0.3, this.x, this.y, this.radius * 2.5);
+                    glowGrad.addColorStop(0, 'rgba(0,255,255,0.9)'); glowGrad.addColorStop(0.3, 'rgba(0,140,255,0.6)');
+                    glowGrad.addColorStop(0.7, 'rgba(0,60,255,0.2)'); glowGrad.addColorStop(1, 'rgba(0,30,255,0)');
+                    ctx.fillStyle = glowGrad;
+                    ctx.beginPath(); ctx.arc(this.x, this.y, this.radius * 2.5, 0, Math.PI * 2); ctx.fill();
+
+                    const coreGrad = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, this.radius);
+                    coreGrad.addColorStop(0, '#ffffff'); coreGrad.addColorStop(0.3, '#aaffff');
+                    coreGrad.addColorStop(0.6, '#30aaff'); coreGrad.addColorStop(1, '#0055ff');
+                    ctx.fillStyle = coreGrad;
+                    ctx.beginPath(); ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2); ctx.fill();
+                }
+                get dead() { return this.lifetime <= 0 || this.x < -1000 || this.x > GAME_WIDTH + 1000 || this.y < -1000 || this.y > GAME_HEIGHT + 1000; }
+                getBounds() { return { left: this.x - this.radius, right: this.x + this.radius, top: this.y - this.radius, bottom: this.y + this.radius }; }
+            }
+
             let projectiles = [];
 
             // ─────────────────────────────────────
-            // NPC CLASS (Mod 4 Boss Integrated)
+            // NPC CLASSES
             // ─────────────────────────────────────
             class NPC {
-                constructor(x, y, platform, speed, requiredHits, isBoss = false) {
-                    this.isBoss = isBoss;
-                    this.scale = isBoss ? 6 : 1;
-                    
+                constructor(x, y, platform, speed, requiredHits) {
                     this.x = x; this.y = y;
-                    this.width = 26 * this.scale; this.height = 34 * this.scale;
-                    this.platform = platform; 
-                    
-                    if (this.isBoss) {
-                        this.speed = speed / 2.5; 
-                        this.hp = requiredHits * 15;
-                        this.chargeTimer = 0;
-                    } else {
-                        this.speed = speed;
-                        this.hp = requiredHits;
-                    }
-                    this.maxHp = this.hp;
+                    this.width = 26; this.height = 34;
+                    this.platform = platform; this.speed = speed;
+                    this.hp = requiredHits;
+                    this.maxHp = requiredHits;
                     
                     this.damageFlashTimer = 0;
                     this.direction = Math.random() < 0.5 ? 1 : -1;
@@ -667,20 +659,6 @@
                     this.animTimer = Math.random() * 60; this.eyeBlink = 0;
                 }
                 update() {
-                    // Boss specific logic
-                    if (this.isBoss && player) {
-                        if (player.centerX < this.centerX - 10) this.direction = -1;
-                        else if (player.centerX > this.centerX + 10) this.direction = 1;
-                        
-                        this.chargeTimer++;
-                        if (this.chargeTimer % 60 === 0 && this.chargeTimer < 300) sfxFireCharge(this.chargeTimer);
-                        
-                        if (this.chargeTimer >= 300) { // Fires after exactly 5 seconds (300 frames)
-                            this.fireBlueFireball();
-                            this.chargeTimer = 0;
-                        }
-                    }
-
                     this.x += this.direction * this.speed;
                     if (this.x <= this.patrolMin) { this.x = this.patrolMin; this.direction = 1; }
                     if (this.x >= this.patrolMax) { this.x = this.patrolMax; this.direction = -1; }
@@ -690,83 +668,44 @@
                     
                     if (this.damageFlashTimer > 0) this.damageFlashTimer--;
                 }
-                fireBlueFireball() {
-                    sfxFireShoot(5.0);
-                    const dx = player.centerX - this.centerX;
-                    const dy = player.centerY - (this.y + this.height * 0.35);
-                    const dist = Math.sqrt(dx*dx + dy*dy);
-                    const pSpeed = 10;
-                    const vx = (dx / dist) * pSpeed;
-                    const vy = (dy / dist) * pSpeed;
-
-                    const fx = this.direction > 0 ? this.x + this.width + 10 : this.x - 10;
-                    const fy = this.y + this.height * 0.35;
-
-                    const proj = new Projectile(fx, fy, this.direction, 5.0, 'boss_fireball');
-                    proj.vx = vx; proj.vy = vy;
-                    proj.useVector = true;
-                    projectiles.push(proj);
-                }
                 draw(ctx) {
                     const cx = this.x + this.width / 2;
                     const bottom = this.y + this.height; 
-                    const bob = Math.sin(this.animTimer * 0.15) * (2 * this.scale);
+                    const bob = Math.sin(this.animTimer * 0.15) * 2;
                     const facingRight = this.direction > 0;
 
                     ctx.fillStyle = 'rgba(0,0,0,0.35)';
-                    ctx.beginPath(); ctx.ellipse(cx, bottom - 2, this.width / 2, 3 * this.scale, 0, 0, Math.PI * 2); ctx.fill();
+                    ctx.beginPath(); ctx.ellipse(cx, bottom - 2, this.width / 2, 3, 0, 0, Math.PI * 2); ctx.fill();
 
-                    let flashAlpha = this.damageFlashTimer / 12;
-                    let flashColor = '#ff0000';
-                    
-                    if (this.isBoss && this.chargeTimer > 0) {
-                        flashColor = '#00aaff';
-                        flashAlpha = Math.max(flashAlpha, Math.abs(Math.sin(this.chargeTimer * 0.15)) * 0.5 + 0.2);
-                        
-                        const p = this.chargeTimer / 300;
-                        const orbX = facingRight ? cx + this.width/2.5 : cx - this.width/2.5;
-                        const orbY = bottom - this.height * 0.6;
-                        ctx.fillStyle = `rgba(0, 150, 255, ${p * 0.6})`;
-                        ctx.beginPath(); ctx.arc(orbX, orbY, 40 * p, 0, Math.PI*2); ctx.fill();
-                    }
-
-                    const bw = 26; // Base width for internal sprite drawing
+                    const flashAlpha = this.damageFlashTimer / 12; 
                     drawEntityWithFlash(ctx, cx, bottom + bob, facingRight, (sCtx) => {
                         sCtx.fillStyle = '#3d2b1a';
-                        sCtx.fillRect(-bw / 2 + 3, -12, 7, 12);
-                        sCtx.fillRect(bw / 2 - 10, -12, 7, 12);
+                        sCtx.fillRect(-this.width / 2 + 3, -12, 7, 12);
+                        sCtx.fillRect(this.width / 2 - 10, -12, 7, 12);
                         sCtx.fillStyle = '#2a1a0a';
-                        sCtx.fillRect(-bw / 2 + 1, -5, 9, 5);
-                        sCtx.fillRect(bw / 2 - 10, -5, 9, 5);
+                        sCtx.fillRect(-this.width / 2 + 1, -5, 9, 5);
+                        sCtx.fillRect(this.width / 2 - 10, -5, 9, 5);
 
                         const bodyGrad = sCtx.createLinearGradient(0, -26, 0, -10);
-                        if (this.isBoss) {
-                            bodyGrad.addColorStop(0, '#ff5555'); bodyGrad.addColorStop(0.5, '#cc0000'); bodyGrad.addColorStop(1, '#880000');
-                        } else {
-                            bodyGrad.addColorStop(0, '#6b8e5a'); bodyGrad.addColorStop(0.5, '#4a6b3a'); bodyGrad.addColorStop(1, '#2e4520');
-                        }
+                        bodyGrad.addColorStop(0, '#6b8e5a'); bodyGrad.addColorStop(0.5, '#4a6b3a'); bodyGrad.addColorStop(1, '#2e4520');
                         sCtx.fillStyle = bodyGrad;
-                        sCtx.fillRect(-bw / 2 + 2, -26, bw - 4, 16);
+                        sCtx.fillRect(-this.width / 2 + 2, -26, this.width - 4, 16);
 
-                        sCtx.fillStyle = '#3d2b1a'; sCtx.fillRect(-bw / 2 + 2, -14, bw - 4, 4);
+                        sCtx.fillStyle = '#3d2b1a'; sCtx.fillRect(-this.width / 2 + 2, -14, this.width - 4, 4);
                         sCtx.fillStyle = '#c9a84c'; sCtx.fillRect(-2, -15, 4, 6);
 
-                        const headY = -30; const headR = bw / 2 - 2;
+                        const headY = -30; const headR = this.width / 2 - 2;
                         const headGrad = sCtx.createRadialGradient(0, headY - 2, headR * 0.2, 0, headY, headR);
-                        if (this.isBoss) {
-                            headGrad.addColorStop(0, '#ff8888'); headGrad.addColorStop(0.6, '#cc0000'); headGrad.addColorStop(1, '#aa0000');
-                        } else {
-                            headGrad.addColorStop(0, '#b8d4a0'); headGrad.addColorStop(0.6, '#7a9a5e'); headGrad.addColorStop(1, '#4a6030');
-                        }
+                        headGrad.addColorStop(0, '#b8d4a0'); headGrad.addColorStop(0.6, '#7a9a5e'); headGrad.addColorStop(1, '#4a6030');
                         sCtx.fillStyle = headGrad;
                         sCtx.beginPath(); sCtx.arc(0, headY, headR, 0, Math.PI * 2); sCtx.fill();
 
-                        sCtx.fillStyle = this.isBoss ? '#aa0000' : '#8aae6e';
+                        sCtx.fillStyle = '#8aae6e';
                         sCtx.beginPath(); sCtx.moveTo(-headR + 2, headY - 3); sCtx.lineTo(-headR - 7, headY - 16); sCtx.lineTo(-headR + 5, headY - 8); sCtx.closePath(); sCtx.fill();
                         sCtx.beginPath(); sCtx.moveTo(headR - 2, headY - 3); sCtx.lineTo(headR + 7, headY - 16); sCtx.lineTo(headR - 5, headY - 8); sCtx.closePath(); sCtx.fill();
 
                         if (this.eyeBlink <= 0) {
-                            sCtx.fillStyle = this.isBoss ? '#00aaff' : '#ff0000'; // Boss Blue eyes, Normal Red eyes
+                            sCtx.fillStyle = '#ff0000';
                             sCtx.beginPath(); sCtx.arc(-4, headY - 1, 3.5, 0, Math.PI * 2); sCtx.fill();
                             sCtx.beginPath(); sCtx.arc(4, headY - 1, 3.5, 0, Math.PI * 2); sCtx.fill();
                             sCtx.fillStyle = '#000';
@@ -782,16 +721,154 @@
                         }
                         sCtx.strokeStyle = '#2a1a0a'; sCtx.lineWidth = 1.5;
                         sCtx.beginPath(); sCtx.arc(0, headY + 4, 5, 0.1, Math.PI - 0.1); sCtx.stroke();
-                    }, flashColor, flashAlpha, this.scale);
+                    }, '#ff0000', flashAlpha);
                 }
-                getBounds() { return { left: this.x + 3*this.scale, right: this.x + this.width - 3*this.scale, top: this.y + 2*this.scale, bottom: this.y + this.height }; }
+                getBounds() { return { left: this.x + 3, right: this.x + this.width - 3, top: this.y + 2, bottom: this.y + this.height }; }
                 get centerX() { return this.x + this.width / 2; }
                 get centerY() { return this.y + this.height / 2; }
             }
+
+            class BossNPC {
+                constructor(x, y, platform) {
+                    this.x = x; this.y = y;
+                    this.width = 26 * 6; this.height = 34 * 6;
+                    this.platform = platform;
+                    this.speed = (0.8 + level * 0.25) / 2.5; 
+                    this.hp = 50; 
+                    this.maxHp = 50;
+                    this.direction = -1;
+                    this.patrolMin = platform.left + 4;
+                    this.patrolMax = platform.right - this.width - 4;
+                    this.animTimer = 0; this.eyeBlink = 0;
+                    this.damageFlashTimer = 0;
+                    this.attackTimer = 0; 
+                    this.isCharging = false;
+                }
+                update() {
+                    if (this.damageFlashTimer > 0) this.damageFlashTimer--;
+                    if (this.eyeBlink > 0) this.eyeBlink--;
+                    if (Math.random() < 0.008) this.eyeBlink = 8;
+
+                    if (this.isCharging) {
+                        this.attackTimer++;
+                        if (this.attackTimer % 20 === 0) sfxFireCharge(this.attackTimer);
+                        if (this.attackTimer >= 300) { 
+                            this.shootBlueFireball();
+                            this.isCharging = false;
+                            this.attackTimer = 0;
+                        }
+                        return;
+                    }
+
+                    this.x += this.direction * this.speed;
+                    if (this.x <= this.patrolMin) { this.x = this.patrolMin; this.direction = 1; }
+                    if (this.x >= this.patrolMax) { this.x = this.patrolMax; this.direction = -1; }
+                    this.animTimer++;
+
+                    if (Math.random() < 0.004) { 
+                        this.isCharging = true;
+                        this.attackTimer = 0;
+                    }
+                }
+                shootBlueFireball() {
+                    const dx = player.centerX - this.centerX;
+                    const dy = player.centerY - (this.y + this.height/2 - 50); 
+                    const dist = Math.sqrt(dx*dx + dy*dy);
+                    const vx = (dx/dist) * 11; 
+                    const vy = (dy/dist) * 11;
+                    projectiles.push(new BossProjectile(this.centerX, this.y + this.height/2 - 50, vx, vy));
+                    sfxFireShoot(5); 
+                }
+                draw(ctx) {
+                    const cx = this.x + this.width / 2;
+                    const bottom = this.y + this.height;
+                    const bob = Math.sin(this.animTimer * 0.15) * 12;
+                    const facingRight = this.direction > 0;
+
+                    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+                    ctx.beginPath(); ctx.ellipse(cx, bottom - 2, this.width / 2, 18, 0, 0, Math.PI * 2); ctx.fill();
+
+                    const flashAlpha = this.damageFlashTimer / 12;
+                    let chargeColor = null; let chargeAlpha = 0;
+                    if (this.isCharging) {
+                        chargeColor = '#0088ff';
+                        chargeAlpha = Math.abs(Math.sin(this.attackTimer * 0.15)) * 0.5 + 0.2;
+                    }
+
+                    spriteCtx.clearRect(0, 0, 120, 120);
+                    spriteCtx.save();
+                    spriteCtx.translate(60, 100);
+                    if (!facingRight) spriteCtx.scale(-1, 1);
+
+                    const bw = 26; 
+                    spriteCtx.fillStyle = '#3d2b1a';
+                    spriteCtx.fillRect(-bw / 2 + 3, -12, 7, 12);
+                    spriteCtx.fillRect(bw / 2 - 10, -12, 7, 12);
+                    spriteCtx.fillStyle = '#2a1a0a';
+                    spriteCtx.fillRect(-bw / 2 + 1, -5, 9, 5);
+                    spriteCtx.fillRect(bw / 2 - 10, -5, 9, 5);
+
+                    const bodyGrad = spriteCtx.createLinearGradient(0, -26, 0, -10);
+                    bodyGrad.addColorStop(0, '#cc3333'); bodyGrad.addColorStop(0.5, '#aa2222'); bodyGrad.addColorStop(1, '#881111');
+                    spriteCtx.fillStyle = bodyGrad;
+                    spriteCtx.fillRect(-bw / 2 + 2, -26, bw - 4, 16);
+
+                    spriteCtx.fillStyle = '#3d2b1a'; spriteCtx.fillRect(-bw / 2 + 2, -14, bw - 4, 4);
+                    spriteCtx.fillStyle = '#c9a84c'; spriteCtx.fillRect(-2, -15, 4, 6);
+
+                    const headY = -30; const headR = bw / 2 - 2;
+                    const headGrad = spriteCtx.createRadialGradient(0, headY - 2, headR * 0.2, 0, headY, headR);
+                    headGrad.addColorStop(0, '#ff6666'); headGrad.addColorStop(0.6, '#cc3333'); headGrad.addColorStop(1, '#990000');
+                    spriteCtx.fillStyle = headGrad;
+                    spriteCtx.beginPath(); spriteCtx.arc(0, headY, headR, 0, Math.PI * 2); spriteCtx.fill();
+
+                    spriteCtx.fillStyle = '#cc4444';
+                    spriteCtx.beginPath(); spriteCtx.moveTo(-headR + 2, headY - 3); spriteCtx.lineTo(-headR - 7, headY - 16); spriteCtx.lineTo(-headR + 5, headY - 8); spriteCtx.closePath(); spriteCtx.fill();
+                    spriteCtx.beginPath(); spriteCtx.moveTo(headR - 2, headY - 3); spriteCtx.lineTo(headR + 7, headY - 16); spriteCtx.lineTo(headR - 5, headY - 8); spriteCtx.closePath(); spriteCtx.fill();
+
+                    if (this.eyeBlink <= 0) {
+                        spriteCtx.fillStyle = '#0088ff';
+                        spriteCtx.beginPath(); spriteCtx.arc(-4, headY - 1, 3.5, 0, Math.PI * 2); spriteCtx.fill();
+                        spriteCtx.beginPath(); spriteCtx.arc(4, headY - 1, 3.5, 0, Math.PI * 2); spriteCtx.fill();
+                        spriteCtx.fillStyle = '#000';
+                        spriteCtx.beginPath(); spriteCtx.arc(-3, headY - 1, 1.8, 0, Math.PI * 2); spriteCtx.fill();
+                        spriteCtx.beginPath(); spriteCtx.arc(5, headY - 1, 1.8, 0, Math.PI * 2); spriteCtx.fill();
+                        spriteCtx.fillStyle = '#fff';
+                        spriteCtx.beginPath(); spriteCtx.arc(-5, headY - 2.5, 1, 0, Math.PI * 2); spriteCtx.fill();
+                        spriteCtx.beginPath(); spriteCtx.arc(3, headY - 2.5, 1, 0, Math.PI * 2); spriteCtx.fill();
+                    } else {
+                        spriteCtx.strokeStyle = '#300'; spriteCtx.lineWidth = 2;
+                        spriteCtx.beginPath(); spriteCtx.moveTo(-7, headY - 1); spriteCtx.lineTo(-1, headY - 1); spriteCtx.stroke();
+                        spriteCtx.beginPath(); spriteCtx.moveTo(1, headY - 1); spriteCtx.lineTo(7, headY - 1); spriteCtx.stroke();
+                    }
+                    spriteCtx.strokeStyle = '#2a1a0a'; spriteCtx.lineWidth = 1.5;
+                    spriteCtx.beginPath(); spriteCtx.arc(0, headY + 4, 5, 0.1, Math.PI - 0.1); spriteCtx.stroke();
+                    
+                    spriteCtx.restore();
+
+                    if (flashAlpha > 0 || chargeAlpha > 0) {
+                        spriteCtx.globalCompositeOperation = 'source-atop';
+                        if (flashAlpha > 0) {
+                            spriteCtx.fillStyle = '#ffffff'; spriteCtx.globalAlpha = flashAlpha; spriteCtx.fillRect(0, 0, 120, 120);
+                        }
+                        if (chargeAlpha > 0) {
+                            spriteCtx.fillStyle = chargeColor; spriteCtx.globalAlpha = chargeAlpha; spriteCtx.fillRect(0, 0, 120, 120);
+                        }
+                        spriteCtx.globalAlpha = 1.0;
+                        spriteCtx.globalCompositeOperation = 'source-over';
+                    }
+
+                    ctx.drawImage(spriteCanvas, cx - 60 * 6, bottom + bob - 100 * 6, 120 * 6, 120 * 6);
+                }
+                getBounds() { return { left: this.x + 10, right: this.x + this.width - 10, top: this.y + 10, bottom: this.y + this.height }; }
+                get centerX() { return this.x + this.width / 2; }
+                get centerY() { return this.y + this.height / 2; }
+            }
+
             let npcs = [];
 
             // ─────────────────────────────────────
-            // PLAYER CLASS (Mod 2 Instant Input Fix)
+            // PLAYER CLASS
             // ─────────────────────────────────────
             class Player {
                 constructor(x, y) {
@@ -843,67 +920,76 @@
                         this.animTimer = 0;
                     }
 
+                    const currentJumpPressed = isJumpInput();
+                    const currentFirePressed = isFireInput();
+                    const currentLightningPressed = isLightningInput();
+                    
                     if (this.isGrounded) this.coyoteTimer = 5;
                     else if (this.coyoteTimer > 0) this.coyoteTimer--;
 
-                    // Mod 2 Fix: Instant Jump trigger + Visual charge preserve
-                    const currentJumpPressed = isJumpInput();
-                    if (currentJumpPressed && !this.wasJumpInput && (this.isGrounded || this.coyoteTimer > 0)) {
-                        this.vy = this.jumpForce;
-                        this.isGrounded = false;
-                        this.coyoteTimer = 0;
-                        sfxJump();
-                        this.jumpChargeFrames = 1; 
-                    } 
-                    else if (currentJumpPressed && this.jumpChargeFrames > 0) {
+                    // INSTANT JUMP RESPONSE
+                    if (currentJumpPressed && !this.wasJumpInput) {
+                        if (this.isGrounded || this.coyoteTimer > 0) {
+                            const baseHeight = Math.pow(this.jumpForce, 2) / (2 * this.gravity);
+                            this.vy = -Math.sqrt(2 * this.gravity * baseHeight);
+                            this.isGrounded = false; this.coyoteTimer = 0;
+                            sfxJump();
+                        }
+                    }
+                    if (currentJumpPressed) {
                         this.jumpChargeFrames++;
                         if (this.jumpChargeFrames % 12 === 0) sfxJumpCharge(this.jumpChargeFrames);
-                    } 
-                    else if (!currentJumpPressed && this.wasJumpInput && this.jumpChargeFrames > 0) {
-                        // Mid-air boost on charged release
-                        if (this.jumpChargeFrames > 20) {
+                    } else if (!currentJumpPressed && this.wasJumpInput) {
+                        // Release charged jump for mid-air boost
+                        if (this.jumpChargeFrames > 24) { 
                             const intervals = Math.floor(this.jumpChargeFrames / 12);
                             const bonusMultiplier = Math.min(1.0, intervals * 0.05);
-                            this.vy = this.jumpForce * (0.6 + bonusMultiplier);
-                            sfxJumpChargedRelease();
-                            spawnParticles(this.centerX, this.y + this.height, 15 + bonusMultiplier*20, ['#fff', '#aaddff'], 4 + bonusMultiplier*3, 20, 3);
+                            if (bonusMultiplier > 0) {
+                                const baseHeight = Math.pow(this.jumpForce, 2) / (2 * this.gravity);
+                                const targetHeight = baseHeight * (1.0 + bonusMultiplier);
+                                this.vy = -Math.sqrt(2 * this.gravity * targetHeight);
+                                sfxJumpChargedRelease();
+                                spawnParticles(this.centerX, this.y + this.height, 15 + bonusMultiplier*20, ['#fff', '#aaddff'], 4 + bonusMultiplier*3, 20, 3);
+                            }
                         }
                         this.jumpChargeFrames = 0;
-                    } 
-                    else if (!currentJumpPressed) {
+                    } else {
                         this.jumpChargeFrames = 0;
                     }
                     this.wasJumpInput = currentJumpPressed;
 
-                    // Mod 2 Fix: Instant Attack trigger
-                    const currentFirePressed = isFireInput();
-                    if (currentFirePressed && !this.wasFireInput && this.attackCooldown <= 0) {
-                        this.shoot('fireball', 0); // Instant base shot
-                        this.fireChargeFrames = 1;
-                    } else if (currentFirePressed && !currentLightningPressed) {
+                    // INSTANT FIRE RESPONSE
+                    if (currentFirePressed && !this.wasFireInput && this.attackCooldown <= 0 && !currentLightningPressed) {
+                        this.shoot('fireball', 0);
+                    }
+                    if (currentFirePressed && !currentLightningPressed) {
                         this.fireChargeFrames++;
                         if (this.fireChargeFrames === 60) sfxPowerThreshold();
                         if (this.fireChargeFrames > 60 && this.fireChargeFrames % 20 === 0) sfxFireCharge(this.fireChargeFrames);
                     } else if (!currentFirePressed && this.wasFireInput) {
-                        if (this.fireChargeFrames >= 60 && this.attackCooldown <= 0) {
-                            this.shoot('fireball', this.fireChargeFrames); // Charged shot release
+                        if (this.fireChargeFrames >= 60) {
+                            this.shoot('fireball', this.fireChargeFrames);
                         }
+                        this.fireChargeFrames = 0;
+                    } else {
                         this.fireChargeFrames = 0;
                     }
                     this.wasFireInput = currentFirePressed;
 
-                    const currentLightningPressed = isLightningInput();
-                    if (currentLightningPressed && !this.wasLightningInput && this.attackCooldown <= 0) {
-                        this.shoot('lightning', 0); 
-                        this.lightningChargeFrames = 1;
-                    } else if (currentLightningPressed && !currentFirePressed) {
+                    // INSTANT LIGHTNING RESPONSE
+                    if (currentLightningPressed && !this.wasLightningInput && this.attackCooldown <= 0 && !currentFirePressed) {
+                        this.shoot('lightning', 0);
+                    }
+                    if (currentLightningPressed && !currentFirePressed) {
                         this.lightningChargeFrames++;
                         if (this.lightningChargeFrames === 60) sfxPowerThreshold();
                         if (this.lightningChargeFrames > 60 && this.lightningChargeFrames % 20 === 0) sfxLightningCharge(this.lightningChargeFrames);
                     } else if (!currentLightningPressed && this.wasLightningInput) {
-                        if (this.lightningChargeFrames >= 60 && this.attackCooldown <= 0) {
+                        if (this.lightningChargeFrames >= 60) {
                             this.shoot('lightning', this.lightningChargeFrames);
                         }
+                        this.lightningChargeFrames = 0;
+                    } else {
                         this.lightningChargeFrames = 0;
                     }
                     this.wasLightningInput = currentLightningPressed;
@@ -931,37 +1017,36 @@
 
                     if (this.x < 0) this.x = 0;
                     if (this.x + this.width > GAME_WIDTH) this.x = GAME_WIDTH - this.width;
-                    if (this.y > GAME_HEIGHT + 60) this.takeDamage(); // Dying to pit counts as normal damage
+                    if (this.y > GAME_HEIGHT + 60) this.respawn();
                 }
                 
                 respawn() {
-                    this.x = 60; this.y = 350; this.vy = -6;
+                    this.x = 80; this.y = 350; this.vy = -6;
                     this.jumpChargeFrames = 0; this.fireChargeFrames = 0; this.lightningChargeFrames = 0;
                     this.invincible = true; this.invincibleTimer = 80; this.attackCooldown = 0;
                 }
                 
-                // Mod 5 Fix: Separate Lives and Health Logic
-                takeDamage(forceKill = false) {
-                    if (this.invincible && !forceKill && playerHealth > 0) return false;
+                takeDamage(instakill = false) {
+                    if (this.invincible && !instakill) return false;
                     
-                    if (playerHealth > 0) playerHealth--;
-                    if (forceKill) playerHealth = 0;
+                    if (instakill) playerHealth = 0;
+                    else playerHealth--;
 
-                    this.invincible = true; this.invincibleTimer = 80;
-                    shakeTimer = 15; shakeIntensity = 6; sfxHurt();
-                    spawnParticles(this.centerX, this.centerY, 20, ['#ff4444', '#ff8888', '#ff0000', '#ffffff'], 5, 30, 4);
-                    
                     if (playerHealth <= 0) {
-                        extraLives--;
+                        playerLives--;
                         spawnParticles(this.centerX, this.centerY, 50, ['#ff0000', '#ff4444', '#ff8800', '#ffffff', '#ffff00'], 8, 50, 6);
                         shakeTimer = 30; shakeIntensity = 10;
+                        sfxHurt();
                         
-                        if (extraLives < 0) {
+                        if (playerLives <= 0) {
                             gameState = STATE.GAME_OVER; gameOverTimer = 180;
-                            extraLives = 0;
                         } else {
-                            window.pendingRetry = true; // Signal outer loop to restart level
+                            gameState = STATE.RESPAWNING; levelTransitionTimer = 60; // 1 second respawn pause
                         }
+                    } else {
+                        this.invincible = true; this.invincibleTimer = 80;
+                        shakeTimer = 15; shakeIntensity = 6; sfxHurt();
+                        spawnParticles(this.centerX, this.centerY, 20, ['#ff4444', '#ff8888', '#ff0000', '#ffffff'], 5, 30, 4);
                     }
                     return true;
                 }
@@ -1102,97 +1187,101 @@
                 return true;
             }
 
-            // Mod 1: Scattered platform generation & Mod 4: Boss level replacement
-            function generateLevel(lvl, isRetry = false) {
-                platforms = []; npcs = []; projectiles = []; particles = []; drops = [];
-                if (!isRetry) playerHealth = Math.min(playerHealth + 1, maxHealth);
-                else playerHealth = maxHealth;
-                
+            function generateLevel(lvl, isRespawn = false) {
+                platforms = []; npcs = []; projectiles = []; particles = []; items = [];
+                if (!isRespawn) playerHealth = Math.min(playerHealth + 1, maxHealth);
                 gameState = STATE.PLAYING;
                 levelTransitionTimer = 0; gameOverTimer = 0; shakeTimer = 0; shakeIntensity = 0;
 
                 const lightningBtn = document.getElementById('btn-lightning');
                 if (lightningBtn) lightningBtn.style.display = level >= 10 ? 'flex' : 'none';
+                
                 const instLightning = document.getElementById('inst-lightning-wrapper');
                 if (instLightning) instLightning.style.display = level >= 10 ? 'inline' : 'none';
 
+                // GIANT BOSS DEMON GENERATION
+                if (lvl % 10 === 0) {
+                    const groundY = 488;
+                    const ground = new Platform(-10, groundY, GAME_WIDTH + 20, 60);
+                    platforms.push(ground);
+                    
+                    npcs.push(new BossNPC(GAME_WIDTH - 300, groundY - (34 * 6), ground));
+                    npcsRemaining = 1;
+
+                    if (!player) player = new Player(80, groundY - 40);
+                    else { player.respawn(); player.y = groundY - 40; }
+                    return;
+                }
+
+                const difficulty = lvl;
+                const numElevatedPlatforms = Math.min(5 + Math.floor(difficulty * 1.3), 20);
+                
                 const groundY = 488;
                 const ground = new Platform(-10, groundY, GAME_WIDTH + 20, 60);
                 platforms.push(ground);
 
-                if (lvl % 10 === 0) { // Mod 4: Boss Level Replace
-                    const bossHitsRequired = Math.ceil(1 * Math.pow(1.2, level - 1));
-                    npcs.push(new NPC(GAME_WIDTH - 250, groundY - (34 * 6), ground, 0.8 + lvl * 0.25, bossHitsRequired, true));
-                    npcsRemaining = 1;
-                } else {
-                    const difficulty = lvl;
-                    const numElevatedPlatforms = Math.min(5 + Math.floor(difficulty * 1.3), 20);
-                    
-                    for (let i = 0; i < numElevatedPlatforms; i++) {
-                        let placed = false; let attempts = 0;
-                        while (!placed && attempts < 100) {
-                            const parent = platforms[Math.floor(Math.random() * platforms.length)];
-                            const dirX = Math.random() < 0.5 ? -1 : 1;
-                            const offsetX = (Math.random() * 120 + 20) * dirX; 
-                            const offsetY = (Math.random() * 160) - 80; 
-                            
-                            let w = 60 + Math.random() * 120; let x = parent.x + offsetX; let y = parent.top - offsetY;
+                const minGapX = 80;
+                const minGapY = 80;
 
-                            if (x < 10) x = 10; if (x + w > GAME_WIDTH - 10) x = GAME_WIDTH - w - 10;
-                            if (y > groundY - 60) y = groundY - 60; if (y < 80) y = 80;
+                for (let i = 0; i < numElevatedPlatforms; i++) {
+                    let placed = false; let attempts = 0;
+                    while (!placed && attempts < 100) {
+                        const parent = platforms[Math.floor(Math.random() * platforms.length)];
+                        const dirX = Math.random() < 0.5 ? -1 : 1;
+                        const offsetX = (Math.random() * 120 + 20) * dirX; 
+                        const offsetY = (Math.random() * 160) - 80; 
+                        
+                        let w = 60 + Math.random() * 120; let x = parent.x + offsetX; let y = parent.top - offsetY;
 
-                            const newPlat = new Platform(x, y, w, 16); let isValid = true;
+                        if (x < 10) x = 10; if (x + w > GAME_WIDTH - 10) x = GAME_WIDTH - w - 10;
+                        if (y > groundY - 60) y = groundY - 60; if (y < 80) y = 80;
 
-                            // Mod 1: Strict Minimum Gap enforcement
-                            const MIN_GAP_X = 50; 
-                            const MIN_GAP_Y = 50;
-                            
-                            for (const plat of platforms) {
-                                const isHorizOverlap = (newPlat.left - MIN_GAP_X) < plat.right && (newPlat.right + MIN_GAP_X) > plat.left;
-                                const isVertOverlap = (newPlat.top - MIN_GAP_Y) < plat.bottom && (newPlat.bottom + MIN_GAP_Y) > plat.top;
-                                if (isHorizOverlap && isVertOverlap) { isValid = false; break; }
-                            }
-                            
-                            if (isValid && !canReach(parent, newPlat) && !canReach(newPlat, parent)) isValid = false;
-                            if (isValid) { platforms.push(newPlat); placed = true; }
-                            attempts++;
+                        const newPlat = new Platform(x, y, w, 16); let isValid = true;
+
+                        for (const plat of platforms) {
+                            const isHorizOverlap = newPlat.left < plat.right + minGapX && newPlat.right > plat.left - minGapX;
+                            const isVertOverlap = newPlat.top < plat.bottom + minGapY && newPlat.bottom > plat.top - minGapY;
+                            if (isHorizOverlap && isVertOverlap) { isValid = false; break; }
                         }
+                        if (isValid && !canReach(parent, newPlat) && !canReach(newPlat, parent)) isValid = false;
+                        if (isValid) { platforms.push(newPlat); placed = true; }
+                        attempts++;
                     }
-
-                    let reachableSet = new Set(); reachableSet.add(platforms[0]); let queue = [platforms[0]];
-                    while(queue.length > 0) {
-                        let curr = queue.shift();
-                        for (let p of platforms) {
-                            if (!reachableSet.has(p)) {
-                                if (canReach(curr, p) || canReach(p, curr)) { reachableSet.add(p); queue.push(p); }
-                            }
-                        }
-                    }
-                    platforms = platforms.filter(p => reachableSet.has(p));
-
-                    const npcCount = Math.min(3 + Math.floor(difficulty * 1.5), 20);
-                    const npcSpeed = 0.8 + difficulty * 0.25;
-                    const cappedNpcSpeed = Math.min(npcSpeed, 5.5);
-                    const requiredHits = Math.ceil(1 * Math.pow(1.2, level - 1));
-
-                    const shuffledPlatforms = [...platforms].sort(() => Math.random() - 0.5);
-                    let npcsToPlace = npcCount;
-                    
-                    for (const plat of shuffledPlatforms) {
-                        if (npcsToPlace <= 0) break;
-                        if (plat === ground && Math.random() > 0.5) continue;
-                        const npcsOnThisPlat = plat.width > 100 ? Math.min(npcsToPlace, 1 + Math.floor(Math.random() * 2)) : 1;
-                        for (let n = 0; n < npcsOnThisPlat && npcsToPlace > 0; n++) {
-                            const nx = plat.left + 10 + Math.random() * (plat.width - 40); const ny = plat.top - 34;
-                            npcs.push(new NPC(nx, ny, plat, cappedNpcSpeed + Math.random() * 1.5, requiredHits));
-                            npcsToPlace--;
-                        }
-                    }
-                    npcsRemaining = npcs.length;
                 }
 
+                let reachableSet = new Set(); reachableSet.add(platforms[0]); let queue = [platforms[0]];
+                while(queue.length > 0) {
+                    let curr = queue.shift();
+                    for (let p of platforms) {
+                        if (!reachableSet.has(p)) {
+                            if (canReach(curr, p) || canReach(p, curr)) { reachableSet.add(p); queue.push(p); }
+                        }
+                    }
+                }
+                platforms = platforms.filter(p => reachableSet.has(p));
+
+                const npcCount = Math.min(3 + Math.floor(difficulty * 1.5), 20);
+                const npcSpeed = 0.8 + difficulty * 0.25;
+                const cappedNpcSpeed = Math.min(npcSpeed, 5.5);
+                const requiredHits = Math.ceil(1 * Math.pow(1.2, level - 1));
+
+                const shuffledPlatforms = [...platforms].sort(() => Math.random() - 0.5);
+                let npcsToPlace = npcCount;
+                
+                for (const plat of shuffledPlatforms) {
+                    if (npcsToPlace <= 0) break;
+                    if (plat === ground && Math.random() > 0.5) continue;
+                    const npcsOnThisPlat = plat.width > 100 ? Math.min(npcsToPlace, 1 + Math.floor(Math.random() * 2)) : 1;
+                    for (let n = 0; n < npcsOnThisPlat && npcsToPlace > 0; n++) {
+                        const nx = plat.left + 10 + Math.random() * (plat.width - 40); const ny = plat.top - 34;
+                        npcs.push(new NPC(nx, ny, plat, cappedNpcSpeed + Math.random() * 1.5, requiredHits));
+                        npcsToPlace--;
+                    }
+                }
+                npcsRemaining = npcs.length;
+
                 if (!player) player = new Player(80, groundY - 40);
-                else { player.x = 80; player.y = groundY - 40; player.vy = 0; player.vx = 0; player.isGrounded = true; player.invincible = true; player.invincibleTimer = 60; player.attackCooldown = 0; player.jumpChargeFrames = 0; player.fireChargeFrames = 0; player.lightningChargeFrames = 0; }
+                else { player.respawn(); player.y = groundY - 40; }
             }
 
             // ─────────────────────────────────────
@@ -1238,17 +1327,13 @@
                 ctx.beginPath(); ctx.moveTo(0, 38); ctx.lineTo(GAME_WIDTH, 38); ctx.stroke();
 
                 ctx.fillStyle = '#ffffff'; ctx.font = 'bold 16px "Segoe UI", "Press Start 2P", system-ui, sans-serif'; ctx.textAlign = 'left';
-                ctx.fillText(`🌍 Level ${level}`, 15, 27);
+                ctx.fillText(`🌍 Level ${level}  |  🩷 x${playerLives}`, 15, 27);
 
                 ctx.textAlign = 'center'; ctx.fillStyle = '#ff9f43';
                 ctx.fillText(`👾 ${npcsRemaining} remaining`, GAME_WIDTH / 2, 27);
 
                 ctx.textAlign = 'right'; ctx.fillStyle = '#ffd700';
                 ctx.fillText(`⭐ ${score}`, GAME_WIDTH - 15, 27);
-
-                // Mod 5 UI Addition
-                ctx.textAlign = 'right'; ctx.fillStyle = '#ff66b2';
-                ctx.fillText(`Lives: ${extraLives} 🩷`, GAME_WIDTH - 15, 58);
 
                 ctx.textAlign = 'left'; let heartsStr = '';
                 for (let i = 0; i < playerHealth; i++) heartsStr += '❤️';
@@ -1258,7 +1343,7 @@
                 if (player) {
                     if (player.attackCooldown > 0) {
                         const cdPercent = player.attackCooldown / player.attackCooldownMax;
-                        const cdX = GAME_WIDTH - 80; const cdY = 70;
+                        const cdX = GAME_WIDTH - 80; const cdY = 55;
                         ctx.fillStyle = 'rgba(255,255,255,0.3)'; ctx.fillRect(cdX, cdY, 60, 6);
                         ctx.fillStyle = '#ff6b35'; ctx.fillRect(cdX, cdY, 60 * (1 - cdPercent), 6);
                         ctx.fillStyle = '#fff'; ctx.font = '10px "Segoe UI", system-ui, sans-serif'; ctx.textAlign = 'right';
@@ -1269,7 +1354,7 @@
                     if (chargeFrames > 0) {
                         const maxBarFrames = 180;
                         const p = Math.min(1, chargeFrames / maxBarFrames);
-                        const cdX = GAME_WIDTH - 150; const cdY = 70;
+                        const cdX = GAME_WIDTH - 150; const cdY = 55;
                         ctx.fillStyle = 'rgba(255,255,255,0.3)'; ctx.fillRect(cdX, cdY, 50, 6);
                         ctx.fillStyle = player.lightningChargeFrames > 0 ? '#00ffff' : '#ffaa00'; ctx.fillRect(cdX, cdY, 50 * p, 6);
                         ctx.fillStyle = '#fff'; ctx.font = '10px "Segoe UI", system-ui, sans-serif'; ctx.textAlign = 'right';
@@ -1278,7 +1363,7 @@
                     
                     if (player.jumpChargeFrames > 0) {
                         const p = Math.min(1, player.jumpChargeFrames / 240); 
-                        const cdX = GAME_WIDTH - 220; const cdY = 70;
+                        const cdX = GAME_WIDTH - 220; const cdY = 55;
                         ctx.fillStyle = 'rgba(255,255,255,0.3)'; ctx.fillRect(cdX, cdY, 50, 6);
                         ctx.fillStyle = '#ffffff'; ctx.fillRect(cdX, cdY, 50 * p, 6);
                         ctx.fillStyle = '#fff'; ctx.font = '10px "Segoe UI", system-ui, sans-serif'; ctx.textAlign = 'right';
@@ -1329,6 +1414,17 @@
                     return;
                 }
 
+                if (gameState === STATE.RESPAWNING) {
+                    levelTransitionTimer--;
+                    particles.forEach(p => p.update()); particles = particles.filter(p => !p.dead);
+                    if (shakeTimer > 0) shakeTimer--;
+                    if (levelTransitionTimer <= 0) {
+                        playerHealth = maxHealth;
+                        generateLevel(level, true); 
+                    }
+                    return;
+                }
+
                 if (gameState === STATE.LEVEL_COMPLETE) {
                     levelTransitionTimer--;
                     particles.forEach(p => p.update()); particles = particles.filter(p => !p.dead);
@@ -1340,87 +1436,88 @@
                     return;
                 }
 
-                window.pendingRetry = false; // Flag for Mod 5 Respawn mechanic
                 player.update(platforms);
+
+                for (let i = items.length - 1; i >= 0; i--) {
+                    items[i].update();
+                    const ib = items[i].getBounds();
+                    const pb = player.getBounds();
+                    if (pb.left < ib.right && pb.right > ib.left && pb.top < ib.bottom && pb.bottom > ib.top) {
+                        if (items[i].type === 'health') {
+                            playerHealth = Math.min(playerHealth + 1, maxHealth);
+                        } else {
+                            playerLives++;
+                        }
+                        sfxLevelUp();
+                        items.splice(i, 1);
+                    }
+                }
 
                 for (const proj of projectiles) proj.update();
                 projectiles = projectiles.filter(p => !p.dead);
                 for (const npc of npcs) npc.update();
 
-                // Projectile Hit detection
                 for (let f = projectiles.length - 1; f >= 0; f--) {
                     const proj = projectiles[f];
-                    const projBounds = proj.getBounds();
-                    
-                    // Mod 4: Instakill Fireball Check against player
-                    if (proj.type === 'boss_fireball') {
-                        const pBounds = player.getBounds();
-                        if (!player.invincible && pBounds.left < projBounds.right && pBounds.right > projBounds.left && pBounds.top < projBounds.bottom && pBounds.bottom > projBounds.top) {
-                            player.takeDamage(true); // Force instant kill
-                            projectiles.splice(f, 1);
-                        }
-                        continue; // Boss projectiles don't hurt NPCs
-                    }
-
                     let hit = false;
-                    for (let n = npcs.length - 1; n >= 0; n--) {
-                        const npc = npcs[n];
-                        const npcBounds = npc.getBounds();
-                        if (projBounds.left < npcBounds.right && projBounds.right > npcBounds.left && projBounds.top < npcBounds.bottom && projBounds.bottom > npcBounds.top) {
-                            
-                            npc.hp -= proj.damage;
-                            projectiles.splice(f, 1);
-                            
-                            if (npc.hp <= 0) {
-                                // Mod 3 & Mod 5: Health & Life Drop System tracking
-                                totalDemonsKilled++;
-                                if (totalDemonsKilled % 10 === 0) {
-                                    drops.push(new Drop(npc.centerX, npc.centerY, 'life'));
-                                } else if (totalDemonsKilled % 2 === 0) {
-                                    drops.push(new Drop(npc.centerX, npc.centerY, 'health'));
-                                }
 
-                                const pCount = Math.min(100, 15 + proj.radius);
-                                spawnParticles(npc.centerX, npc.centerY, pCount, ['#ff6b35', '#ff9f43', '#ffcc02', '#ffffff', '#ff4400'], 4 + proj.radius/10, 35, 3 + proj.radius/15);
-                                spawnParticles(npc.centerX, npc.centerY, 8, ['#ff0000', '#ff4444'], 4, 20, 3);
-                                npcs.splice(n, 1);
-                                score += 100 + level * 10; npcsRemaining = npcs.length;
-                                shakeTimer = 8 + Math.min(20, proj.radius/4); shakeIntensity = 4 + Math.min(10, proj.radius/10); sfxHit(); 
-                            } else {
-                                npc.damageFlashTimer = 12;
-                                spawnParticles(npc.centerX, npc.centerY, 8, ['#ff0000', '#ff4444', '#fff'], 4, 15, 2);
-                                sfxHit();
+                    if (proj.type === 'boss_fireball') {
+                        if (!player.invincible) {
+                            const pBounds = player.getBounds();
+                            const projBounds = proj.getBounds();
+                            if (pBounds.left < projBounds.right && pBounds.right > projBounds.left && pBounds.top < projBounds.bottom && pBounds.bottom > projBounds.top) {
+                                player.takeDamage(true); 
+                                projectiles.splice(f, 1);
+                                hit = true;
+                                continue;
                             }
-                            hit = true; break;
                         }
                     }
+
+                    if (!hit && proj.type !== 'boss_fireball') {
+                        const projBounds = proj.getBounds();
+                        for (let n = npcs.length - 1; n >= 0; n--) {
+                            const npc = npcs[n];
+                            const npcBounds = npc.getBounds();
+                            if (projBounds.left < npcBounds.right && projBounds.right > npcBounds.left && projBounds.top < npcBounds.bottom && projBounds.bottom > npcBounds.top) {
+                                
+                                npc.hp -= proj.damage;
+                                projectiles.splice(f, 1);
+                                
+                                if (npc.hp <= 0) {
+                                    sessionDemonsKilled++;
+                                    totalDemonsKilled++;
+                                    
+                                    if (sessionDemonsKilled % 2 === 0) items.push(new Item(npc.centerX, npc.centerY, 'health'));
+                                    if (totalDemonsKilled % 10 === 0) items.push(new Item(npc.centerX, npc.centerY, 'life'));
+
+                                    const pCount = Math.min(100, 15 + proj.radius);
+                                    spawnParticles(npc.centerX, npc.centerY, pCount, ['#ff6b35', '#ff9f43', '#ffcc02', '#ffffff', '#ff4400'], 4 + proj.radius/10, 35, 3 + proj.radius/15);
+                                    spawnParticles(npc.centerX, npc.centerY, 8, ['#ff0000', '#ff4444'], 4, 20, 3);
+                                    npcs.splice(n, 1);
+                                    score += 100 + level * 10; npcsRemaining = npcs.length;
+                                    shakeTimer = 8 + Math.min(20, proj.radius/4); shakeIntensity = 4 + Math.min(10, proj.radius/10); sfxHit(); 
+                                } else {
+                                    npc.damageFlashTimer = 12;
+                                    spawnParticles(npc.centerX, npc.centerY, 8, ['#ff0000', '#ff4444', '#fff'], 4, 15, 2);
+                                    sfxHit();
+                                }
+                                hit = true; break;
+                            }
+                        }
+                    }
+
                     if (hit) continue;
                     
                     if (proj.x < -300 || proj.x > GAME_WIDTH + 300) {
                         projectiles.splice(f, 1);
                         if (proj.type === 'fireball') spawnParticles(proj.x, proj.y, 5, ['#ffaa00', '#ff6600'], 3, 10, 3);
-                        else spawnParticles(proj.x, proj.y, 5, ['#00ffff', '#ffffff'], 3, 10, 3);
+                        else if (proj.type === 'lightning') spawnParticles(proj.x, proj.y, 5, ['#00ffff', '#ffffff'], 3, 10, 3);
                     }
                 }
 
-                // Check collision with Drops
-                const pBounds = player.getBounds();
-                for (let i = drops.length - 1; i >= 0; i--) {
-                    drops[i].update();
-                    const dB = drops[i].getBounds();
-                    if (pBounds.left < dB.right && pBounds.right > dB.left && pBounds.top < dB.bottom && pBounds.bottom > dB.top) {
-                        if (drops[i].type === 'health') {
-                            playerHealth = Math.min(playerHealth + 1, maxHealth);
-                            sfxLevelUp();
-                        } else if (drops[i].type === 'life') {
-                            extraLives++;
-                            sfxLevelUp();
-                        }
-                        drops.splice(i, 1);
-                    }
-                }
-
-                if (!player.invincible) {
+                if (!player.invincible && gameState === STATE.PLAYING) {
+                    const pBounds = player.getBounds();
                     for (const npc of npcs) {
                         const nBounds = npc.getBounds();
                         if (pBounds.left < nBounds.right && pBounds.right > nBounds.left && pBounds.top < nBounds.bottom && pBounds.bottom > nBounds.top) {
@@ -1440,10 +1537,6 @@
 
                 particles.forEach(p => p.update()); particles = particles.filter(p => !p.dead);
                 if (shakeTimer > 0) shakeTimer--;
-
-                if (window.pendingRetry) { // Executed cleanly outside the loop
-                    generateLevel(level, true); 
-                }
             }
 
             function render() {
@@ -1463,7 +1556,7 @@
                 ctx.save(); ctx.translate(shakeX, shakeY);
                 drawBackground(ctx);
                 for (const plat of platforms) plat.draw(ctx);
-                for (const d of drops) d.draw(ctx); // Mod 3 & 5
+                for (const item of items) item.draw(ctx);
                 for (const npc of npcs) npc.draw(ctx);
                 for (const proj of projectiles) proj.draw(ctx);
                 for (const p of particles) p.draw(ctx);
@@ -1476,9 +1569,9 @@
             }
 
             function restartGame() {
-                level = 1; score = 0; playerHealth = maxHealth; player = null;
-                extraLives = 3; totalDemonsKilled = 0; // Mod 5 Reset
-                platforms = []; npcs = []; projectiles = []; particles = []; drops = [];
+                level = 1; score = 0; playerHealth = maxHealth; playerLives = 3; player = null;
+                sessionDemonsKilled = 0; totalDemonsKilled = 0;
+                platforms = []; npcs = []; projectiles = []; particles = []; items = [];
                 gameState = STATE.PLAYING; levelTransitionTimer = 0; gameOverTimer = 0; shakeTimer = 0; shakeIntensity = 0;
                 generateLevel(1); initAudio();
             }
