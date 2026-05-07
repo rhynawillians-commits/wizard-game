@@ -143,10 +143,10 @@
             color: #fff;
         }
         
-        /* Specific Lightning Button Styles */
         .mob-btn.lightning {
             border-color: rgba(0, 255, 255, 0.5);
             color: rgba(0, 255, 255, 0.8);
+            display: none; /* Escondido por padrão até o level 10 */
         }
         
         .mob-btn.lightning:active, .mob-btn.lightning.active {
@@ -155,46 +155,67 @@
             color: #fff;
         }
 
-        #rotate-overlay {
-            display: none;
-            position: fixed;
-            top: 0; left: 0; width: 100vw; height: 100vh;
-            background: #1a1a2e;
-            z-index: 9999;
-            color: white;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            text-align: center;
-        }
-
-        #rotate-overlay .icon {
-            font-size: 50px;
-            margin-bottom: 20px;
-            animation: rotate-phone 2s ease-in-out infinite;
-        }
-
-        @keyframes rotate-phone {
-            0% { transform: rotate(0deg); }
-            50% { transform: rotate(-90deg); }
-            100% { transform: rotate(-90deg); }
-        }
-
         body.mobile-mode { gap: 0; }
         body.mobile-mode #game-container { border: none; border-radius: 0; width: 100vw; height: 100vh; }
         body.mobile-mode canvas { border-radius: 0; }
 
-        @media screen and (orientation: portrait) {
-            body.mobile-mode #game-wrapper { display: none !important; }
-            body.mobile-mode #rotate-overlay { display: flex !important; }
+        /* Estilos da Tela de História */
+        #story-overlay {
+            position: fixed;
+            top: 0; left: 0; width: 100vw; height: 100vh;
+            background: rgba(26, 26, 46, 0.95);
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            padding: 20px;
         }
+
+        #story-overlay h1 {
+            color: #ff4444;
+            font-size: 32px;
+            margin-bottom: 20px;
+            text-shadow: 0 0 10px rgba(255, 68, 68, 0.5);
+        }
+
+        #story-overlay p {
+            color: #e0d4ff;
+            font-size: 18px;
+            max-width: 600px;
+            line-height: 1.6;
+            margin-bottom: 40px;
+        }
+
+        #btn-start {
+            padding: 15px 30px;
+            font-size: 18px;
+            background: #ff9f43;
+            color: white;
+            border: 2px solid #c06020;
+            border-radius: 8px;
+            cursor: pointer;
+            font-family: inherit;
+            font-weight: bold;
+            transition: transform 0.1s, background 0.2s;
+        }
+
+        #btn-start:hover { background: #ffaa00; }
+        #btn-start:active { transform: scale(0.95); }
+
     </style>
 </head>
 <body>
-    <div id="rotate-overlay">
-        <div class="icon">📱</div>
-        <h2 style="font-size:24px; margin-bottom: 10px;">Please Rotate Device</h2>
-        <p style="font-size:16px; color: #b8a9d4;">Rotate your phone to landscape mode<br>to play the game.</p>
+
+    <div id="story-overlay">
+        <h1>A Invasão dos Demônios</h1>
+        <p>
+            O cruel reino dos demônios invadiu e espalhou o caos pelo reino dos humanos.<br><br>
+            Você é <b>Yerleh</b>, o último grande mago. Sua missão é purificar a terra, 
+            derrotar todos os monstros e restaurar a paz!
+        </p>
+        <button id="btn-start">Iniciar Missão</button>
     </div>
 
     <div id="game-wrapper">
@@ -207,7 +228,6 @@
                     <div class="mob-btn" id="btn-right">▶</div>
                 </div>
                 <div class="mob-panel">
-                    <!-- Lightning button visible from stage 1 -->
                     <div class="mob-btn lightning pulse-anim" id="btn-lightning">⚡</div>
                     <div class="mob-btn fire pulse-anim" id="btn-fire">🔥</div>
                     <div class="mob-btn pulse-anim" id="btn-jump">▲</div>
@@ -218,8 +238,10 @@
         <div id="instructions">
             <span class="key">A D</span> Move &nbsp;|&nbsp;
             <span class="key pulse-anim">HOLD W</span> Jump &nbsp;|&nbsp;
-            <span class="key fire pulse-anim">HOLD F / Click</span> Fire &nbsp;|&nbsp;
-            <span class="key lightning pulse-anim">HOLD E</span> Lightning
+            <span class="key fire pulse-anim">HOLD F / Click</span> Fire
+            <span id="inst-lightning-wrapper" style="display:none;">
+                &nbsp;|&nbsp; <span class="key lightning pulse-anim">HOLD E</span> Lightning
+            </span>
         </div>
     </div>
 
@@ -248,7 +270,6 @@
             canvas.width = GAME_WIDTH;
             canvas.height = GAME_HEIGHT;
 
-            // Off-screen canvas for geometry-perfect masking
             const spriteCanvas = document.createElement('canvas');
             spriteCanvas.width = 120;
             spriteCanvas.height = 120;
@@ -336,15 +357,14 @@
             }
 
             function sfxPowerThreshold() {
-                // Ping when reaching 1s charge (3x base)
                 playBeep(1000, 0.1, 'sine', 0.08, 500);
             }
 
             // ─────────────────────────────────────
             // GAME STATE
             // ─────────────────────────────────────
-            const STATE = { PLAYING: 'playing', LEVEL_COMPLETE: 'levelComplete', GAME_OVER: 'gameOver' };
-            let gameState = STATE.PLAYING;
+            const STATE = { STORY: 'story', PLAYING: 'playing', LEVEL_COMPLETE: 'levelComplete', GAME_OVER: 'gameOver' };
+            let gameState = STATE.STORY; // Começa na história
             let levelTransitionTimer = 0;
             let gameOverTimer = 0;
             let level = 1;
@@ -362,11 +382,11 @@
             let mousePressed = false;
             let mobLeft = false, mobRight = false, mobJump = false, mobFire = false, mobLightning = false;
 
-            window.addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; keys[e.code] = true; initAudio(); });
+            window.addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; keys[e.code] = true; });
             window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; keys[e.code] = false; });
 
             if (!isMobileDevice) {
-                canvas.addEventListener('mousedown', e => { mousePressed = true; initAudio(); });
+                canvas.addEventListener('mousedown', e => { mousePressed = true; });
                 canvas.addEventListener('mouseup', () => { mousePressed = false; });
                 canvas.addEventListener('mouseleave', () => { mousePressed = false; });
             }
@@ -375,7 +395,7 @@
                 const bindBtn = (id, setter) => {
                     const btn = document.getElementById(id);
                     if (!btn) return;
-                    const press = (e) => { e.preventDefault(); e.stopPropagation(); setter(true); btn.classList.add('active'); initAudio(); };
+                    const press = (e) => { e.preventDefault(); e.stopPropagation(); setter(true); btn.classList.add('active'); };
                     const release = (e) => { e.preventDefault(); e.stopPropagation(); setter(false); btn.classList.remove('active'); };
                     btn.addEventListener('touchstart', press, { passive: false });
                     btn.addEventListener('touchend', release, { passive: false });
@@ -393,7 +413,12 @@
             function isLeftInput() { return keys['a'] || keys['arrowleft'] || keys['KeyA'] || keys['ArrowLeft'] || mobLeft; }
             function isRightInput() { return keys['d'] || keys['arrowright'] || keys['KeyD'] || keys['ArrowRight'] || mobRight; }
             function isFireInput() { return keys['f'] || keys['j'] || keys['KeyF'] || keys['KeyJ'] || mousePressed || mobFire; }
-            function isLightningInput() { return keys['e'] || keys['k'] || keys['KeyE'] || keys['KeyK'] || mobLightning; }
+            
+            // Trava o input de raio até o level 10
+            function isLightningInput() { 
+                if (level < 10) return false;
+                return keys['e'] || keys['k'] || keys['KeyE'] || keys['KeyK'] || mobLightning; 
+            }
 
             // ─────────────────────────────────────
             // CORE UTILS
@@ -424,7 +449,6 @@
                 }
             }
 
-            // Entity draw wrapper using offscreen canvas for geometry-perfect masking
             function drawEntityWithFlash(ctx, cx, bottom, facingRight, drawFunc, flashColor = null, flashAlpha = 0) {
                 spriteCtx.clearRect(0, 0, 120, 120);
                 spriteCtx.save();
@@ -561,7 +585,7 @@
             let projectiles = [];
 
             // ─────────────────────────────────────
-            // NPC CLASS (With Difficulty Scaling)
+            // NPC CLASS
             // ─────────────────────────────────────
             class NPC {
                 constructor(x, y, platform, speed, requiredHits) {
@@ -595,11 +619,9 @@
                     const bob = Math.sin(this.animTimer * 0.15) * 2;
                     const facingRight = this.direction > 0;
 
-                    // Shadow
                     ctx.fillStyle = 'rgba(0,0,0,0.35)';
                     ctx.beginPath(); ctx.ellipse(cx, bottom - 2, this.width / 2, 3, 0, 0, Math.PI * 2); ctx.fill();
 
-                    // Masking Body Drawing
                     const flashAlpha = this.damageFlashTimer / 12; 
                     drawEntityWithFlash(ctx, cx, bottom + bob, facingRight, (sCtx) => {
                         sCtx.fillStyle = '#3d2b1a';
@@ -653,7 +675,7 @@
             let npcs = [];
 
             // ─────────────────────────────────────
-            // PLAYER CLASS (Precise Mechanics)
+            // PLAYER CLASS
             // ─────────────────────────────────────
             class Player {
                 constructor(x, y) {
@@ -670,8 +692,8 @@
                     this.animTimer = 0; 
                     this.invincible = false;
                     this.invincibleTimer = 0; 
+                    this.eyeBlink = 0; // Novo sistema para piscar
                     
-                    // Attack State
                     this.attackCooldown = 0;
                     this.attackCooldownMax = 22; 
                     
@@ -681,12 +703,15 @@
                     this.lightningChargeFrames = 0;
                     this.wasLightningInput = false;
 
-                    // Jump State
                     this.jumpChargeFrames = 0;
                     this.wasJumpInput = false;
                 }
                 
                 update(platforms) {
+                    // Update para piscar os olhos do jogador
+                    if (this.eyeBlink > 0) this.eyeBlink--;
+                    if (Math.random() < 0.008) this.eyeBlink = 8;
+
                     if (this.invincible) {
                         this.invincibleTimer--;
                         if (this.invincibleTimer <= 0) this.invincible = false;
@@ -710,15 +735,12 @@
                     if (this.isGrounded) this.coyoteTimer = 5;
                     else if (this.coyoteTimer > 0) this.coyoteTimer--;
 
-                    // 1. Math-accurate Jump Mechanic (Max 200% original)
                     if (currentJumpPressed && (this.isGrounded || this.coyoteTimer > 0)) {
                         this.jumpChargeFrames++;
                         if (this.jumpChargeFrames % 12 === 0) sfxJumpCharge(this.jumpChargeFrames);
                     } 
                     else if (!currentJumpPressed && this.wasJumpInput) {
                         if (this.isGrounded || this.coyoteTimer > 0) {
-                            
-                            // Every 0.2s (12 frames) -> +5% (0.05). Limit -> +100% (1.0). Total -> 200%.
                             const intervals = Math.floor(this.jumpChargeFrames / 12);
                             const bonusMultiplier = Math.min(1.0, intervals * 0.05);
                             
@@ -744,7 +766,6 @@
                     if (!this.isGrounded && this.coyoteTimer <= 0) this.jumpChargeFrames = 0;
                     this.wasJumpInput = currentJumpPressed;
 
-                    // 2. Math-accurate Fireball Mechanic
                     if (currentFirePressed && !currentLightningPressed) {
                         this.fireChargeFrames++;
                         if (this.fireChargeFrames === 60) sfxPowerThreshold();
@@ -757,7 +778,6 @@
                     }
                     this.wasFireInput = currentFirePressed;
 
-                    // 3. Math-accurate Lightning Mechanic
                     if (currentLightningPressed && !currentFirePressed) {
                         this.lightningChargeFrames++;
                         if (this.lightningChargeFrames === 60) sfxPowerThreshold();
@@ -770,12 +790,10 @@
                     }
                     this.wasLightningInput = currentLightningPressed;
 
-                    // Physics Application
                     this.vy += this.gravity;
                     if (this.vy > this.maxFallSpeed) this.vy = this.maxFallSpeed;
                     this.x += this.vx; this.y += this.vy;
 
-                    // Collisions
                     const playerBounds = this.getBounds();
                     this.isGrounded = false;
                     for (const plat of platforms) {
@@ -823,7 +841,6 @@
                     if (frames >= 60) {
                         const extraFrames = frames - 60;
                         const intervals = Math.floor(extraFrames / 12);
-                        // Starts at 3.0x, adds 0.04x per 0.2s, max 20x
                         multiplier = Math.min(20.0, 3.0 + intervals * 0.04);
                     }
                     
@@ -852,7 +869,6 @@
                     ctx.fillStyle = 'rgba(0,0,0,0.3)';
                     ctx.beginPath(); ctx.ellipse(cx, bottom - 1, this.width / 2, 3, 0, 0, Math.PI * 2); ctx.fill();
 
-                    // Evaluate highest active charge for visual flash overlay
                     let flashColor = null;
                     let flashAlpha = 0;
                     
@@ -896,15 +912,22 @@
                         sCtx.fillStyle = '#4a3590';
                         sCtx.beginPath(); sCtx.moveTo(0, headY - 22); sCtx.lineTo(3, headY - 14); sCtx.lineTo(-2, headY - 10); sCtx.closePath(); sCtx.fill();
 
-                        sCtx.fillStyle = '#fff';
-                        sCtx.beginPath(); sCtx.arc(-3, headY - 1, 3.5, 0, Math.PI * 2); sCtx.fill();
-                        sCtx.beginPath(); sCtx.arc(3, headY - 1, 3.5, 0, Math.PI * 2); sCtx.fill();
-                        sCtx.fillStyle = '#2a1a0a';
-                        sCtx.beginPath(); sCtx.arc(-2, headY, 2, 0, Math.PI * 2); sCtx.fill();
-                        sCtx.beginPath(); sCtx.arc(4, headY, 2, 0, Math.PI * 2); sCtx.fill();
-                        sCtx.fillStyle = '#fff';
-                        sCtx.beginPath(); sCtx.arc(-3, headY - 1.5, 0.8, 0, Math.PI * 2); sCtx.fill();
-                        sCtx.beginPath(); sCtx.arc(3, headY - 1.5, 0.8, 0, Math.PI * 2); sCtx.fill();
+                        // Lógica de piscar o player
+                        if (this.eyeBlink <= 0) {
+                            sCtx.fillStyle = '#fff';
+                            sCtx.beginPath(); sCtx.arc(-3, headY - 1, 3.5, 0, Math.PI * 2); sCtx.fill();
+                            sCtx.beginPath(); sCtx.arc(3, headY - 1, 3.5, 0, Math.PI * 2); sCtx.fill();
+                            sCtx.fillStyle = '#2a1a0a';
+                            sCtx.beginPath(); sCtx.arc(-2, headY, 2, 0, Math.PI * 2); sCtx.fill();
+                            sCtx.beginPath(); sCtx.arc(4, headY, 2, 0, Math.PI * 2); sCtx.fill();
+                            sCtx.fillStyle = '#fff';
+                            sCtx.beginPath(); sCtx.arc(-3, headY - 1.5, 0.8, 0, Math.PI * 2); sCtx.fill();
+                            sCtx.beginPath(); sCtx.arc(3, headY - 1.5, 0.8, 0, Math.PI * 2); sCtx.fill();
+                        } else {
+                            sCtx.strokeStyle = '#2a1a0a'; sCtx.lineWidth = 2;
+                            sCtx.beginPath(); sCtx.moveTo(-6, headY - 1); sCtx.lineTo(0, headY - 1); sCtx.stroke();
+                            sCtx.beginPath(); sCtx.moveTo(2, headY - 1); sCtx.lineTo(8, headY - 1); sCtx.stroke();
+                        }
 
                         sCtx.fillStyle = '#ccc';
                         sCtx.beginPath(); sCtx.arc(0, headY + 5, 7, 0.3, Math.PI - 0.3); sCtx.fill();
@@ -917,7 +940,6 @@
                         sCtx.strokeStyle = '#8b5e2f'; sCtx.lineWidth = 1.5;
                         sCtx.beginPath(); sCtx.moveTo(staffX, staffTop); sCtx.lineTo(staffX, staffBottom); sCtx.stroke();
 
-                        // Orb changes color dynamically based on charge
                         const isLightning = this.lightningChargeFrames > 0;
                         const orbY = staffTop;
                         const orbColor1 = isLightning ? '#00ffff' : '#ffaa30';
@@ -956,6 +978,13 @@
                 playerHealth = Math.min(playerHealth + 1, maxHealth);
                 gameState = STATE.PLAYING;
                 levelTransitionTimer = 0; gameOverTimer = 0; shakeTimer = 0; shakeIntensity = 0;
+
+                // Lógica UI do Raio destravado no Level 10
+                const lightningBtn = document.getElementById('btn-lightning');
+                if (lightningBtn) lightningBtn.style.display = level >= 10 ? 'flex' : 'none';
+                
+                const instLightning = document.getElementById('inst-lightning-wrapper');
+                if (instLightning) instLightning.style.display = level >= 10 ? 'inline' : 'none';
 
                 const difficulty = lvl;
                 const numElevatedPlatforms = Math.min(5 + Math.floor(difficulty * 1.3), 20);
@@ -1093,7 +1122,6 @@
                     
                     const chargeFrames = Math.max(player.fireChargeFrames, player.lightningChargeFrames);
                     if (chargeFrames > 0) {
-                        // Max 20x multi -> (20-3)/0.04 = 425 intervals -> 425 * 12 frames = 5100 frames to max. We'll show progress bar to say 3 seconds (180 frames) 
                         const maxBarFrames = 180;
                         const p = Math.min(1, chargeFrames / maxBarFrames);
                         const cdX = GAME_WIDTH - 150; const cdY = 55;
@@ -1104,7 +1132,7 @@
                     }
                     
                     if (player.jumpChargeFrames > 0) {
-                        const p = Math.min(1, player.jumpChargeFrames / 240); // 4 secs to max
+                        const p = Math.min(1, player.jumpChargeFrames / 240); 
                         const cdX = GAME_WIDTH - 220; const cdY = 55;
                         ctx.fillStyle = 'rgba(255,255,255,0.3)'; ctx.fillRect(cdX, cdY, 50, 6);
                         ctx.fillStyle = '#ffffff'; ctx.fillRect(cdX, cdY, 50 * p, 6);
@@ -1112,7 +1140,6 @@
                         ctx.fillText('JMP', cdX - 4, cdY + 6);
                     }
 
-                    // Dynamic Weapon State Label
                     ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(15, 75, 160, 20);
                     let label = "MAGIC READY"; let color = "#fff";
                     if (player.lightningChargeFrames > 0) { label = "CHARGING LIGHTNING"; color = "#00ffff"; }
@@ -1145,6 +1172,11 @@
             // MAIN GAME LOOP
             // ─────────────────────────────────────
             function update() {
+                // Pause na história
+                if (gameState === STATE.STORY) {
+                    return;
+                }
+
                 if (gameState === STATE.GAME_OVER) {
                     gameOverTimer--;
                     if (shakeTimer > 0) shakeTimer--;
@@ -1233,6 +1265,13 @@
 
             function render() {
                 ctx.clearRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+                
+                // Pular render do jogo caso esteja na tela de história
+                if (gameState === STATE.STORY) {
+                    drawBackground(ctx);
+                    return;
+                }
+
                 let shakeX = 0; let shakeY = 0;
                 if (shakeTimer > 0) {
                     shakeX = (Math.random() - 0.5) * shakeIntensity * 2;
@@ -1266,11 +1305,16 @@
 
             function init() {
                 player = new Player(80, 448);
-                generateLevel(1);
-                
-                canvas.addEventListener('click', initAudio, { once: true });
-                window.addEventListener('touchstart', initAudio, { once: true });
-                window.addEventListener('keydown', initAudio, { once: true });
+                gameState = STATE.STORY;
+
+                // Hook do botão de iniciar
+                document.getElementById('btn-start').addEventListener('click', () => {
+                    document.getElementById('story-overlay').style.display = 'none';
+                    initAudio();
+                    gameState = STATE.PLAYING;
+                    generateLevel(1);
+                });
+
                 gameLoop();
             }
 
